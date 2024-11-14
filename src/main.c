@@ -6,6 +6,54 @@
 #include "lpc17xx_pinsel.h"
 #include "lpc17xx_gpio.h"
 
+// Pines para IN1 e IN2
+#define IN1_PIN 9    // Conectar IN1 del L298N al pin P0.9
+#define IN2_PIN 8    // Conectar IN2 del L298N al pin P0.8
+#define IN3_PIN 7    // Conectar IN3 del L298N al pin P0.7
+#define IN4_PIN 6    // Conectar IN4 del L298N al pin P0.6
+
+uint8_t motor;
+
+void delay_ms(uint32_t ms) {
+    uint32_t i;
+    for (i = 0; i < ms * 10000; i++) {
+        __NOP(); // No Operation: solo genera una espera
+    }
+}
+
+void motor_forward() {
+	if(motor){	//Motor base - horizontal
+		LPC_GPIO0->FIOSET = (1 << IN1_PIN);  // IN1 en HIGH
+		LPC_GPIO0->FIOCLR = (1 << IN2_PIN);  // IN2 en LOW
+	} else {	//Motor brazo - vertical
+		LPC_GPIO0->FIOSET = (1 << IN3_PIN);  // IN1 en HIGH
+		LPC_GPIO0->FIOCLR = (1 << IN4_PIN);  // IN2 en LOW
+	}
+
+}
+
+void motor_reverse() {
+	if(motor){
+		LPC_GPIO0->FIOCLR = (1 << IN1_PIN);  // IN1 en LOW
+		LPC_GPIO0->FIOSET = (1 << IN2_PIN);  // IN2 en HIGH
+	} else {
+		LPC_GPIO0->FIOCLR = (1 << IN3_PIN);  // IN1 en LOW
+		LPC_GPIO0->FIOSET = (1 << IN4_PIN);  // IN2 en HIGH
+	}
+}
+
+void motor_stop() {
+	if(motor){
+		LPC_GPIO0->FIOCLR = (1 << IN1_PIN);  // IN1 en LOW
+		LPC_GPIO0->FIOCLR = (1 << IN2_PIN);  // IN2 en LOW
+	} else {
+		LPC_GPIO0->FIOCLR = (1 << IN3_PIN);  // IN1 en LOW
+		LPC_GPIO0->FIOCLR = (1 << IN4_PIN);  // IN2 en LOW
+	}
+
+}
+
+
 void confPin(void);
 void confUart(void);
 void UART0_IRQHandler(void);
@@ -19,10 +67,7 @@ int main(void) {
     confUart();
     uint8_t salto1[] = "\n";
     uint8_t salto2[] = "\r";
-    // Apagar todos los LEDs
-                        GPIO_SetValue(0, (1 << 22)); // Apagar LED rojo
-                        GPIO_SetValue(3, (1 << 25)); // Apagar LED verde
-                        GPIO_SetValue(3, (1 << 26)); // Apagar LED azul
+    motor_stop();     // Motor detenido
 
     while(1) {
         len = 0;
@@ -30,42 +75,45 @@ int main(void) {
             len = UART_Receive(LPC_UART0, info, sizeof(info), NONE_BLOCKING);
 
         if(info[0] == 'w') {
-                    // Encender LED rojo en P0.22
-                    GPIO_ClearValue(0, (1 << 22));
-                    // Apagar LEDs verde y azul
-                    GPIO_SetValue(3, (1 << 25));
-                    GPIO_SetValue(3, (1 << 26));
-                    info[0] = 'x';  // Respuesta con 'x'
-                    UART_Send(LPC_UART0, info, sizeof(info), BLOCKING);
-                } else if(info[0] == 'd') { // 'g' para encender el LED verde
-                    // Encender LED verde en P0.25
-                    GPIO_ClearValue(3, (1 << 25));
-                    // Apagar LEDs rojo y azul
-                    GPIO_SetValue(0, (1 << 22));
-                    GPIO_SetValue(3, (1 << 26));
-                    info[0] = 'y';  // Respuesta con 'y'
-                    UART_Send(LPC_UART0, info, sizeof(info), BLOCKING);
-                } else if(info[0] == 'a') { // 'b' para encender el LED azul
-                    // Encender LED azul en P0.26
-                    GPIO_ClearValue(3, (1 << 26));
-                    // Apagar LEDs rojo y verde
-                    GPIO_SetValue(0, (1 << 22));
-                    GPIO_SetValue(3, (1 << 25));
-                    info[0] = 'z';  // Respuesta con 'z'
-                    UART_Send(LPC_UART0, info, sizeof(info), BLOCKING);
-                } else {
-                    // Apagar todos los LEDs
-                    GPIO_SetValue(0, (1 << 22)); // Apagar LED rojo
-                    GPIO_SetValue(3, (1 << 25)); // Apagar LED verde
-                    GPIO_SetValue(3, (1 << 26)); // Apagar LED azul
+        	// Mueve el motor hacia arriba
+        	motor = 1;
+            motor_forward();
+            delay_ms(500);   // Espera 0.5 segundos
+            motor_stop();
+            info[0] = 'x';  // Respuesta con 'x'
+            UART_Send(LPC_UART0, info, sizeof(info), BLOCKING);
+        } else if(info[0] == 's') {
+            //Mueve el motor hacia abajo
+        	motor_reverse();
+        	delay_ms(500);   // Espera 0.5 segundos
+        	motor_stop();
+        	info[0] = 'l';  // Respuesta con 'l'
+        	UART_Send(LPC_UART0, info, sizeof(info), BLOCKING);
+        } else if(info[0] == 'a') {
+        	//Mueve el motor a la izquierda
+        	motor_reverse();
+        	delay_ms(500);   // Espera 0.5 segundos
+        	motor_stop();
+        	info[0] = 'z';  // Respuesta con 'z'
+        	UART_Send(LPC_UART0, info, sizeof(info), BLOCKING);
+        } else if(info[0] == 'd') {
+        	//Mueve el motor a la derecha
+        	motor = 0;
+        	motor_forward();
+        	delay_ms(500);   // Espera 0.5 segundos
+        	motor_stop();
+        	info[0] = 'y';  // Respuesta con 'y'
+        	UART_Send(LPC_UART0, info, sizeof(info), BLOCKING);
+        }else {
+        	motor_stop();     // Detiene el motor
 
-                    if(info[0] == 13) { // Si es Enter (ASCII 13)
-                        UART_Send(LPC_UART0, salto1, sizeof(salto1), BLOCKING);
-                        UART_Send(LPC_UART0, salto2, sizeof(salto2), BLOCKING);
-                    } else {
-                        UART_Send(LPC_UART0, info, sizeof(info), BLOCKING);
-                    }
-                }
+        	if(info[0] == 13) { // Si es Enter (ASCII 13)
+        		UART_Send(LPC_UART0, salto1, sizeof(salto1), BLOCKING);
+        		UART_Send(LPC_UART0, salto2, sizeof(salto2), BLOCKING);
+        	} else {
+        		UART_Send(LPC_UART0, info, sizeof(info), BLOCKING);
+        	}
+        }
     }
     return 0;
 }
@@ -83,12 +131,8 @@ void confPin(void) {
     PinCfg.Pinnum = 3;
     PINSEL_ConfigPin(&PinCfg);
 
-    // Configuración de P0.22 como GPIO de salida para el LED rojo
-    GPIO_SetDir(0, (1 << 22), 1); // P0.22 como salida
-    // Configuración de P0.25 como GPIO de salida para el LED verde
-    GPIO_SetDir(3, (1 << 25), 1); // P3.25 como salida
-    // Configuración de P0.26 como GPIO de salida para el LED azul
-    GPIO_SetDir(3, (1 << 26), 1);
+    // Configuración de los pines P0.9, P0.8, P0.7 y P0.6 como salida
+    LPC_GPIO0->FIODIR |= (1 << IN1_PIN) | (1 << IN2_PIN) | (1 << IN3_PIN) | (1 << IN4_PIN);
 
     return;
 }
@@ -132,3 +176,4 @@ void UART_IntReceive(void) {
     UART_Receive(LPC_UART0, info, sizeof(info), NONE_BLOCKING);
     return;
 }
+
