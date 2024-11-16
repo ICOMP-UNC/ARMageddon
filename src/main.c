@@ -1,250 +1,205 @@
-/**
- * @file main.c
- * @brief Laboratorio 3 (EDIII) "Gates and Hopes" - Control de puerta y sistema de monitoreo ambiental.
- *
- * Este programa implementa un sistema que controla una puerta y monitorea el ambiente a través de diversos sensores.
- * Se utiliza un ADC para leer datos de temperatura, movimiento y detección de incendios. Además, se controla un motor
- * para abrir y cerrar la puerta según las condiciones ambientales, activando una alarma cuando sea necesario.
- *
- * @version 1.0
- * @date 2024
- * @author [Tu nombre]
- *
- * @details
- * - Entrada de temperatura (LM35), sensor de movimiento (PIR) y detección de gases/incendios (MQ-2).
- * - Control de un motor mediante un DAC y GPIO para abrir/cerrar la puerta.
- * - Alarma activada en condiciones críticas (detección de incendio o temperatura baja).
- * - Control manual de la puerta mediante un botón externo.
- *
- */
-
-#ifdef __USE_CMSIS
 #include "LPC17xx.h"
+#include "lpc17xx_gpio.h"
+#include "lpc17xx_pinsel.h"
+#include "lpc17xx_systick.h"
+#include "lpc17xx_exti.h"
+#include "lpc17xx_timer.h"
+#include "lpc17xx_adc.h"
 #include "lpc17xx_dac.h"
 #include "lpc17xx_gpdma.h"
-#include "lpc17xx_spi.h"
 #include "lpc17xx_uart.h"
-#endif
 
-#define TEMP_MIN 124 // 10°C en LM35
+#define LDR0_CHANNEL 0  // Canal ADC0.0 (PIN 0.23)
+#define LDR1_CHANNEL 1  // Canal ADC0.1 (PIN 0.24)
+#define IN1_PIN 9    // Conectar IN1 del L298N al pin P0.9
+#define IN2_PIN 8    // Conectar IN2 del L298N al pin P0.8
 
-#ifdef __USE_MCUEXPRESSO
-#include <cr_section_macros.h> /* The cr_section_macros is specific to the MCUXpresso delivered toolchain */
-#endif
+void configPin(void);
+void configADC(void);
+void configTimer0();
+void configTimer1();
+void ROTATE_COUNTERCLOCKWISE();
+void ROTATE_CLOCKWISE();
+void STOP_MOTOR();
 
-// Declaración de funciones
-/**
- * @brief Activa la alarma.
- *
- * Enciende el LED de alarma conectado al pin P0.22.
- */
-void activarAlarma();
+__IO uint32_t ldr0_value;
+__IO uint32_t ldr1_value;
 
-/**
- * @brief Cierra la puerta.
- *
- * Activa el motor para cerrar la puerta controlado por el pin P0.21 y espera hasta que la puerta esté completamente cerrada.
- */
-void cerrarPuerta();
+uint8_t flag_counterclockwise=0;
+uint8_t flag_clockwise=0;
 
-/**
- * @brief Abre la puerta.
- *
- * Activa el motor para abrir la puerta controlado por el pin P0.21 y utiliza el SysTick para detener el motor tras 5 segundos.
- */
-void abrirPuerta();
+int main(void){
 
-int main(void) {
-
-	//configGPIO();
-	//configIntExt();
+	configPin();
 	configADC();
-	configDAC();
-	//configTimer();
-	//configUart();
-	//configDMA();
-	//configSPI();
-	NVIC_SetPriority(EINT0_IRQn,1);
+	configTimer0();
+	configTimer1();
 
-	// Inicia la puerta abierta
-	if(((LPC_GPIO0->FIOPIN) & (1 << 24)) != 0){
-		LPC_GPIO0->FIOSET = (1);
+
+	while(1){
 	}
 
-	while(1);
-
-    return 0 ;
+	return 0;
 }
 
-/* void configGPIO(void){
-
-- P0.26 funcion aout salida (del DAC) a ULN2003 (Motor de ventilador): (Control del ventilador en base a la temperatura)
-
-- P0.21 funcion gpio salida a ULN2003 (Control de motor de la puerta)
-- P1.18 funcion gpio salida a LED de estado de la batería
-- P0.22 funcion gpio salida a LED de alarma
-- P0.17 funcion gpio (IntExt) entrada de (boton) Final de carrera (Detección de puerta cerrada)
-	NVICEnable(EINT3_IRQn);
-
-- Display SPI (OLED 128x64):
-MOSI: P0.18
-SCLK: P0.15
-CS: P0.16
-
-	return;
-}*/
-
-/**
- * @brief Manejador de interrupción externa para el final de carrera.
- *
- * Detecta cuando la puerta ha llegado al final de su carrera y detiene el motor.
- */
-void EINT3_IRQHandler(void){
-	if((LPC_GPIOINT->IO0IntStatR) & (1<<17)){			/* LLAVE Representacion de sensor de final de carrera de apertura */
-		LPC_GPIO0->FIOCLR = 1;							/* Detiene el motor */
-		LPC_GPIOINT-> IO0IntClr |= (1<<24);
-	}
-	return;
+void configPin(void){
+	//configuro los pines P0.8, P0.9 como salidas GPIO
+	LPC_PINCON->PINSEL0 &= ~(0xF<<16);
+	// Configuración de los pines P0.9, P0.8, P0.7 y P0.6 como salidas
+	LPC_GPIO0->FIODIR |= (0b11<<8);
 }
 
-/* void configIntExt(void){
-
-- P2.10 funcion EINT0 entrada de Botón (Control manual de la puerta)
-	NVICEnable(EINT0_IRQn);
-	return;
-}*/
-
-/**
- * @brief Manejador de interrupción externa para el botón de control manual.
- *
- * Alterna el estado de la puerta entre abierta y cerrada según la condición actual.
- */
-void EINT0_IRQHandler(void){
-
-	//Verifico con el final de carrera en que situacion esta la puerta
-	if(((LPC_GPIO0->FIOPIN) & (1 << 17)) != 0){			/* Si esta cerrada */
-		abrirPuerta();
-	} else if (((LPC_GPIO0->FIOPIN)&(1 << 17)) == 0){ 	/* Si esta abierta */
-		cerrarPuerta();
-	}
-
-	LPC_SC->EXTINT |= 1; //Limpia la bandera de interrupcion externa.
-	return;
-}
-
-void activarAlarma(void){
-	LPC_GPIO0->FIOSET = (1<<22);
-	return;
-}
-
-void cerrarPuerta(void){
-	LPC_GPIO0->FIOSET = (1<<21);					/* Activa el motor para cerrar */
-	while(((LPC_GPIO0->FIOPIN)&(1<<21)) == 0);	    /* espero hasta que el sensor de carrera sea 0(es decir, esta cerrada)*/
-	return;
-}
-
-void abrirPuerta(void){
-
-	LPC_GPIO0->FIOSET = (1<<21);				/* Activa el motor para abrir */
-	SysTick_Config(SystemCoreClock/100); 		/*Configuro el systick para apagar el motor cuando termine de abrir*/
-	while(((LPC_GPIO0->FIOPIN)&(1<<21)) == 0);
-	SYST_CSR &= ~(1 << 0);						// Desactivar SysTick: Limpia el bit ENABLE (bit 0)
-	return;
-}
-
-void SysTick_Handler(void){
-    static uint8_t clkDiv = 0;						/* Divisor del reloj para realizar operaciones cada 5 ciclos */
-
-	//Si el divisor del reloj alcanza 5(s), apaga el motor de la puerta
-    if(clkDiv == 5){
-    	LPC_GPIO0->FIOCLR = (1<<21);				/* Apaga el motor para la apertura */
-        clkDiv = 0;									/* Reinicia el divisor del reloj */
-    } else {
-        clkDiv++;									/* Incrementa el divisor del reloj */
-    }
-
-    SysTick->CTRL &= SysTick->CTRL; 				/* Limpia la bandera de interrupción */
-}
-
-/**
- * @brief Configuración de los canales del ADC.
- *
- * - P0.23: entrada de LM35 (sensor de temperatura)
- * - P0.24: entrada de PIR (sensor de movimiento)
- * - P0.25: entrada de MQ-2 (detección de incendios dentro del refugio)
- * - P0.02: entrada de MQ-2 (detección de gases fuera del refugio)
- */
 void configADC(void){
+	//conf los p0.23 y p024 como AD0 y AD1/
+		PINSEL_CFG_Type pinsel0;
+		pinsel0.OpenDrain = PINSEL_PINMODE_NORMAL;
+		pinsel0.Pinmode = PINSEL_PINMODE_TRISTATE;
+		pinsel0.Funcnum = PINSEL_FUNC_1;
+		pinsel0.Portnum = PINSEL_PORT_0;
+		pinsel0.Pinnum = PINSEL_PIN_23;
+		PINSEL_ConfigPin(&pinsel0);
+		pinsel0.Pinnum = PINSEL_PIN_24;
+		PINSEL_ConfigPin(&pinsel0);
 
-	LPC_PINCON->PINSEL0  |= (1<<14); //P0.2 como ADC0.7
-	LPC_PINCON->PINSEL1  |= ((0x2A)<<14); //P0.23 como ADC0.0, P0.24 como ADC0.1,P0.25 como ADC0.2
+		ADC_Init(LPC_ADC, 200000);
+		ADC_ChannelCmd(LPC_ADC, ADC_CHANNEL_0, ENABLE);
+		ADC_ChannelCmd(LPC_ADC, ADC_CHANNEL_1, ENABLE);
+		ADC_BurstCmd(LPC_ADC, 1);
+		ADC_StartCmd(LPC_ADC, ADC_START_CONTINUOUS);
+	//	ADC_StartCmd(LPC_ADC, ADC_START_ON_MAT01);
+		ADC_IntConfig(LPC_ADC, ADC_ADINTEN0, SET);
+		ADC_IntConfig(LPC_ADC, ADC_ADINTEN1, SET);
 
-	LPC_PINCON->PINMODE0 |= (1<<5); //Ni pull up ni pull down en P0.2
-	LPC_PINCON->PINMODE1 |= ((0x2A)<<14); //Ni pull up ni pull down en P0.23, P0.24, P0.25 Y el pin 23 del puerto 0.
+		NVIC_EnableIRQ(ADC_IRQn);
+}
 
-	LPC_SC->PCONP |= (1 << 12);		 //Se da energia al ADC
-	LPC_ADC->ADCR |= (1 << 21);		 //habilita el ADC
+void ADC_IRQHandler(){
 
-	LPC_SC->PCLKSEL0 |= (3<<24); 	 	//CCLK/8
-	LPC_ADC->ADCR       &=~(255<<8);	 // CLKDIV=0; No hay division extra
+	TIM_Cmd(LPC_TIM0, DISABLE);
+	TIM_ClearIntPending(LPC_TIM0, TIM_MR0_INT);
+	NVIC_DisableIRQ(TIMER0_IRQn);
 
-	LPC_ADC->ADCR |= 0x87;   	 	//Se usa el canal 0,1,2,7 para convertir
-	LPC_ADC->ADCR |= (1 << 16);  	 // Modo burst activado
+	NVIC_DisableIRQ(ADC_IRQn);
 
-	NVIC_EnableIRQ(ADC_IRQn);			 // Habilita interrupcion en NVIC.
+	if(ADC_ChannelGetStatus(LPC_ADC, 0, ADC_DATA_DONE)){
+		ldr0_value = ADC_ChannelGetData(LPC_ADC, 0);
+	}
+	if(ADC_ChannelGetStatus(LPC_ADC, 1, ADC_DATA_DONE)){
+			ldr1_value = ADC_ChannelGetData(LPC_ADC, 1);
+		}
+
+	//preguntamos que canal causo la interrupcion
+	if(ADC_ChannelGetStatus(LPC_ADC, 0, ADC_DATA_DONE) && ADC_ChannelGetStatus(LPC_ADC, 1, ADC_DATA_DONE)){
+
+			ADC_IntConfig(LPC_ADC, ADC_ADINTEN0, RESET);
+			ADC_IntConfig(LPC_ADC, ADC_ADINTEN1, RESET);
+
+			if(ldr0_value > ldr1_value){
+				ROTATE_COUNTERCLOCKWISE();
+			}
+			else if (ldr0_value < ldr1_value){
+				ROTATE_CLOCKWISE();
+			}
+
+			else {
+				STOP_MOTOR();
+			}
+
+		}
+	NVIC_EnableIRQ(TIMER0_IRQn);
+	TIM_Cmd(LPC_TIM0, ENABLE);
+	NVIC_EnableIRQ(ADC_IRQn);
+}
+
+
+void configTimer0(){
+	TIM_TIMERCFG_Type     struct_config;
+	TIM_MATCHCFG_Type     struct_match;
+
+	struct_config.PrescaleOption   =  TIM_PRESCALE_USVAL;
+	struct_config.PrescaleValue    = 1000;  //en microsegundos
+
+	struct_match.MatchChannel        = 1;
+	struct_match.IntOnMatch          = ENABLE;
+	struct_match.ResetOnMatch        = ENABLE;
+	struct_match.StopOnMatch         = DISABLE;
+	struct_match.ExtMatchOutputType  = TIM_EXTMATCH_NOTHING;
+	struct_match.MatchValue          = 10000;   // 100mseg se va a generar un match
+
+	TIM_Init(LPC_TIM0, TIM_TIMER_MODE, &struct_config);
+	TIM_ConfigMatch(LPC_TIM0, &struct_match);
+
+	TIM_Cmd(LPC_TIM0, ENABLE);
+
+
+	NVIC_EnableIRQ(TIMER0_IRQn);
+	return;
+}
+
+
+//voy a usar el timer1 como retardante/
+void configTimer1(){
+	TIM_TIMERCFG_Type     struct_config;
+	TIM_MATCHCFG_Type     struct_match;
+
+	struct_config.PrescaleOption   =  TIM_PRESCALE_USVAL;
+	struct_config.PrescaleValue    = 1000;  //en microsegundos
+
+	struct_match.MatchChannel        = 0;
+	struct_match.IntOnMatch          = ENABLE;
+	struct_match.ResetOnMatch        = ENABLE;
+	struct_match.StopOnMatch         = DISABLE;
+	struct_match.ExtMatchOutputType  = TIM_EXTMATCH_NOTHING;
+	struct_match.MatchValue          = 10000;   // 100mseg se va a generar un match
+
+	TIM_Init(LPC_TIM1, TIM_TIMER_MODE, &struct_config);
+	TIM_ConfigMatch(LPC_TIM1, &struct_match);
+
+	TIM_Cmd(LPC_TIM1, ENABLE);
+	NVIC_EnableIRQ(TIMER1_IRQn);
+	return;
+}
+
+void TIMER1_IRQHandler(void){
+
+	TIM_ClearIntPending(LPC_TIM1,TIM_MR0_INT);
 
 	return;
 }
 
-/**
- * @brief Manejador de interrupción del ADC.
- *
- * Lee los valores de los sensores y activa la alarma o controla la puerta en consecuencia.
- */
-void ADC_IRQHandler(void){
-	uint16_t temp;
 
-	//Sensor de temperatura (LM35)
-	if(LPC_ADC->ADDR0 & (1<<31)){
-		temp = ((LPC_ADC->ADDR0) >> 4) & (0xFFF);
-		if(temp < TEMP_MIN){ //10° en el LM35 = (0.1/3.3)2^12(resolucion)
-			activarAlarma();
-			cerrarPuerta();
-		}
-	}
+void TIMER0_IRQHandler(void){
 
-	//Sensor de movimiento (PIR)
-	if(LPC_ADC->ADDR1 & (1<<31)){
-		if((((LPC_ADC->ADDR1) >> 4) & (0xFFF)) > 0){ //apenas detecta mov se activa la alarma y el cierre de puerta
-			activarAlarma();
-			cerrarPuerta();
-		}
-	}
+	TIM_ClearIntPending(LPC_TIM0,TIM_MR0_INT);
+//	ADC_StartCmd(LPC_ADC, ADC_START_NOW );
 
-	//Sensor de Incendios dentro del refugio (MQ-2)
-	if(LPC_ADC->ADDR2 & (1<<31)){
-		if((((LPC_ADC->ADDR2) >> 4) & (0xFFF)) > 0){ //apenas detecta humo/flama se activa la alarma y el abre la puerta
-			activarAlarma();
-			abrirPuerta();
-		}
-	}
-
-	//Sensor de Gases fuera del refugio (MQ-2)
-	if(LPC_ADC->ADDR7 & (1<<31)){
-		if((((LPC_ADC->ADDR7) >> 4) & (0xFFF)) > 0){ //apenas detecta que afuera no es bueno el aire se activa la alarma y el cierre de puerta
-			activarAlarma();
-			cerrarPuerta();
-		}
-	}
 	return;
 }
 
-/**
- * @brief Configuración del DAC.
- *
- * Inicializa el DAC para controlar dispositivos como el motor de la puerta y el ventilador.
- */
-void configDAC(void){
-	DAC_Init(LPC_DAC);
+
+void ROTATE_COUNTERCLOCKWISE(){
+	LPC_GPIO0->FIOSET = (1 << IN1_PIN);  // IN1 en HIGH
+	LPC_GPIO0->FIOCLR = (1 << IN2_PIN);  // IN2 en LOW
+
+	//retardo
+//	while(!TIM_GetIntStatus(LPC_TIM1,TIM_MR0_INT));
+	flag_counterclockwise=1;
+	flag_clockwise=0;
+	return;
+}
+
+void ROTATE_CLOCKWISE(){
+	LPC_GPIO0->FIOCLR = (1 << IN1_PIN);  // IN1 en LOW
+	LPC_GPIO0->FIOSET = (1 << IN2_PIN);  // IN2 en HIGH
+
+	//retardo
+//	while(!TIM_GetIntStatus(LPC_TIM1,TIM_MR0_INT));
+	flag_counterclockwise=0;
+	flag_clockwise=1;
+	return;
+}
+void STOP_MOTOR(){
+	LPC_GPIO0->FIOSET = (1 << IN1_PIN);  // IN1 en HIGH
+	LPC_GPIO0->FIOSET = (1 << IN2_PIN);  // IN2 en HIGH
 	return;
 }
