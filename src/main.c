@@ -9,10 +9,11 @@
 #include "lpc17xx_gpdma.h"
 #include "lpc17xx_uart.h"
 
-#define LDR0_CHANNEL 0  // Canal ADC0.0 (PIN 0.23)
-#define LDR1_CHANNEL 1  // Canal ADC0.1 (PIN 0.24)
-#define IN1_PIN 9    // Conectar IN1 del L298N al pin P0.9
-#define IN2_PIN 8    // Conectar IN2 del L298N al pin P0.8
+
+#define IN0_PIN 9    // Conectar IN0 del L298N al pin P0.9
+#define IN1_PIN 8    // Conectar IN1 del L298N al pin P0.8
+#define IN2_PIN 27   // Conectar IN2 del L298N al pin P0.27
+#define IN4_PIN 28   // Conectar IN4 del L298N al pin P0.28
 
 void configPin(void);
 void configADC(void);
@@ -21,12 +22,16 @@ void configTimer1();
 void ROTATE_COUNTERCLOCKWISE();
 void ROTATE_CLOCKWISE();
 void STOP_MOTOR();
+void ROTATE_UP();
+void ROTATE_DOWN();
+void STOP_MOTOR_V();
 
 __IO uint32_t ldr0_value;
 __IO uint32_t ldr1_value;
+__IO uint32_t ldr2_value;
+__IO uint32_t ldr4_value;
 
-uint8_t flag_counterclockwise=0;
-uint8_t flag_clockwise=0;
+
 
 int main(void){
 
@@ -47,6 +52,11 @@ void configPin(void){
 	LPC_PINCON->PINSEL0 &= ~(0xF<<16);
 	// Configuración de los pines P0.9, P0.8, P0.7 y P0.6 como salidas
 	LPC_GPIO0->FIODIR |= (0b11<<8);
+
+	//configuro los pines P0.27, P0.28 como salidas GPIO
+	LPC_PINCON->PINSEL1 &= ~(0xF<<22);
+	// Configuración de los pines P0.27, P0.28 como salidas
+	LPC_GPIO0->FIODIR |= (0b11<<27);
 }
 
 void configADC(void){
@@ -60,15 +70,25 @@ void configADC(void){
 		PINSEL_ConfigPin(&pinsel0);
 		pinsel0.Pinnum = PINSEL_PIN_24;
 		PINSEL_ConfigPin(&pinsel0);
+	//conf los p0.25 y p1.30 como AD2 y AD4/
+		pinsel0.Pinnum = PINSEL_PIN_25;
+		PINSEL_ConfigPin(&pinsel0);
+		pinsel0.Portnum = PINSEL_PORT_1;
+		pinsel0.Pinnum = PINSEL_PIN_30;
+		PINSEL_ConfigPin(&pinsel0);
 
 		ADC_Init(LPC_ADC, 200000);
 		ADC_ChannelCmd(LPC_ADC, ADC_CHANNEL_0, ENABLE);
 		ADC_ChannelCmd(LPC_ADC, ADC_CHANNEL_1, ENABLE);
+		ADC_ChannelCmd(LPC_ADC, ADC_CHANNEL_2, ENABLE);
+		ADC_ChannelCmd(LPC_ADC, ADC_CHANNEL_4, ENABLE);
 		ADC_BurstCmd(LPC_ADC, 1);
 		ADC_StartCmd(LPC_ADC, ADC_START_CONTINUOUS);
 	//	ADC_StartCmd(LPC_ADC, ADC_START_ON_MAT01);
 		ADC_IntConfig(LPC_ADC, ADC_ADINTEN0, SET);
 		ADC_IntConfig(LPC_ADC, ADC_ADINTEN1, SET);
+		ADC_IntConfig(LPC_ADC, ADC_ADINTEN2, SET);
+		ADC_IntConfig(LPC_ADC, ADC_ADINTEN4, SET);
 
 		NVIC_EnableIRQ(ADC_IRQn);
 }
@@ -81,14 +101,20 @@ void ADC_IRQHandler(){
 
 	NVIC_DisableIRQ(ADC_IRQn);
 
+	//preguntamos que canal causo la interrupcion
 	if(ADC_ChannelGetStatus(LPC_ADC, 0, ADC_DATA_DONE)){
 		ldr0_value = ADC_ChannelGetData(LPC_ADC, 0);
 	}
 	if(ADC_ChannelGetStatus(LPC_ADC, 1, ADC_DATA_DONE)){
-			ldr1_value = ADC_ChannelGetData(LPC_ADC, 1);
-		}
+		ldr1_value = ADC_ChannelGetData(LPC_ADC, 1);
+	}
+	if(ADC_ChannelGetStatus(LPC_ADC, 2, ADC_DATA_DONE)){
+		ldr2_value = ADC_ChannelGetData(LPC_ADC, 2);
+	}
+	if(ADC_ChannelGetStatus(LPC_ADC, 4, ADC_DATA_DONE)){
+		ldr4_value = ADC_ChannelGetData(LPC_ADC, 4);
+	}
 
-	//preguntamos que canal causo la interrupcion
 	if(ADC_ChannelGetStatus(LPC_ADC, 0, ADC_DATA_DONE) && ADC_ChannelGetStatus(LPC_ADC, 1, ADC_DATA_DONE)){
 
 			ADC_IntConfig(LPC_ADC, ADC_ADINTEN0, RESET);
@@ -106,6 +132,24 @@ void ADC_IRQHandler(){
 			}
 
 		}
+	if(ADC_ChannelGetStatus(LPC_ADC, 2, ADC_DATA_DONE) && ADC_ChannelGetStatus(LPC_ADC, 4, ADC_DATA_DONE)){
+
+			ADC_IntConfig(LPC_ADC, ADC_ADINTEN2, RESET);
+			ADC_IntConfig(LPC_ADC, ADC_ADINTEN4, RESET);
+
+			if(ldr2_value > ldr4_value){
+				ROTATE_UP();
+			}
+			else if (ldr2_value < ldr4_value){
+				ROTATE_DOWN();
+			}
+
+			else {
+				STOP_MOTOR_V();
+			}
+
+		}
+
 	NVIC_EnableIRQ(TIMER0_IRQn);
 	TIM_Cmd(LPC_TIM0, ENABLE);
 	NVIC_EnableIRQ(ADC_IRQn);
@@ -177,29 +221,45 @@ void TIMER0_IRQHandler(void){
 }
 
 
-void ROTATE_COUNTERCLOCKWISE(){
-	LPC_GPIO0->FIOSET = (1 << IN1_PIN);  // IN1 en HIGH
-	LPC_GPIO0->FIOCLR = (1 << IN2_PIN);  // IN2 en LOW
+void ROTATE_UP(){
+	LPC_GPIO0->FIOSET = (1 << IN2_PIN);  // IN2 en HIGH
+	LPC_GPIO0->FIOCLR = (1 << IN4_PIN);  // IN4 en LOW
 
-	//retardo
-//	while(!TIM_GetIntStatus(LPC_TIM1,TIM_MR0_INT));
-	flag_counterclockwise=1;
-	flag_clockwise=0;
+	return;
+}
+
+void ROTATE_DOWN(){
+	LPC_GPIO0->FIOCLR = (1 << IN2_PIN);  // IN2 en LOW
+	LPC_GPIO0->FIOSET = (1 << IN4_PIN);  // IN4 en HIGH
+
+	return;
+}
+void STOP_MOTOR_V(){
+	LPC_GPIO0->FIOSET = (1 << IN2_PIN);  // IN2 en HIGH
+	LPC_GPIO0->FIOSET = (1 << IN4_PIN);  // IN4 en HIGH
+
+	return;
+}
+
+void ROTATE_COUNTERCLOCKWISE(){
+	LPC_GPIO0->FIOSET = (1 << IN0_PIN);  // IN0 en HIGH
+	LPC_GPIO0->FIOCLR = (1 << IN1_PIN);  // IN1 en LOW
+
 	return;
 }
 
 void ROTATE_CLOCKWISE(){
-	LPC_GPIO0->FIOCLR = (1 << IN1_PIN);  // IN1 en LOW
-	LPC_GPIO0->FIOSET = (1 << IN2_PIN);  // IN2 en HIGH
+	LPC_GPIO0->FIOCLR = (1 << IN0_PIN);  // IN0 en LOW
+	LPC_GPIO0->FIOSET = (1 << IN1_PIN);  // IN1 en HIGH
 
-	//retardo
-//	while(!TIM_GetIntStatus(LPC_TIM1,TIM_MR0_INT));
-	flag_counterclockwise=0;
-	flag_clockwise=1;
 	return;
 }
 void STOP_MOTOR(){
+	LPC_GPIO0->FIOSET = (1 << IN0_PIN);  // IN0 en HIGH
 	LPC_GPIO0->FIOSET = (1 << IN1_PIN);  // IN1 en HIGH
-	LPC_GPIO0->FIOSET = (1 << IN2_PIN);  // IN2 en HIGH
+
 	return;
 }
+
+
+
