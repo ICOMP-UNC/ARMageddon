@@ -138,4 +138,5 @@ La UART funciona con un módulo USB-UART que conecta el microcontrolador a la co
 
 ---
 
+![ADC_Handler drawio](https://github.com/user-attachments/assets/bba5d45d-62ba-49dd-a4bf-e75dd36e75aa)
 
