@@ -14,6 +14,7 @@
 #define IN1_PIN 8    // Conectar IN1 del L298N al pin P0.8
 #define IN2_PIN 27   // Conectar IN2 del L298N al pin P0.27
 #define IN4_PIN 28   // Conectar IN4 del L298N al pin P0.28
+#define EINT0  	(1<<0)
 
 void configPin(void);
 void configADC(void);
@@ -25,6 +26,14 @@ void STOP_MOTOR();
 void ROTATE_UP();
 void ROTATE_DOWN();
 void STOP_MOTOR_V();
+void configEXT();
+void motor_forward();
+void motor_reverse();
+void motor_stop();
+void confUart(void);
+void UART0_IRQHandler(void);
+void UART_IntReceive(void);
+
 
 __IO uint32_t ldr0_value;
 __IO uint32_t ldr1_value;
@@ -32,16 +41,84 @@ __IO uint32_t ldr2_value;
 __IO uint32_t ldr4_value;
 
 
+uint8_t len = 0;
+uint8_t info[1] = ""; // Tamaño 1 para recibir un solo byte
+
+uint8_t flag_exti=0;
+uint8_t motor;
+
+void delay_ms(uint32_t ms) {
+    uint32_t i;
+    for (i = 0; i < ms * 10000; i++) {
+        __NOP(); // No Operation: solo genera una espera
+    }
+}
+
+uint8_t salto1[] = "\n";
+uint8_t salto2[] = "\r";
 
 int main(void){
 
 	configPin();
+	configEXT();
 	configADC();
 	configTimer0();
 	configTimer1();
+	confUart();
 
+//	motor_stop();     // Motor detenido
 
 	while(1){
+
+		if(flag_exti){
+
+			while(1) {
+				        len = 0;
+				        while(len == 0)
+				            len = UART_Receive(LPC_UART0, info, sizeof(info), NONE_BLOCKING);
+
+				        if(info[0] == 'w') {
+				        	// Mueve el motor hacia arriba
+				        	motor = 1;
+				            motor_forward();
+				            delay_ms(500);   // Espera 0.5 segundos
+				            motor_stop();
+				            info[0] = 'x';  // Respuesta con 'x'
+				            UART_Send(LPC_UART0, info, sizeof(info), BLOCKING);
+				        } else if(info[0] == 's') {
+				            //Mueve el motor hacia abajo
+				        	motor_reverse();
+				        	delay_ms(500);   // Espera 0.5 segundos
+				        	motor_stop();
+				        	info[0] = 'l';  // Respuesta con 'l'
+				        	UART_Send(LPC_UART0, info, sizeof(info), BLOCKING);
+				        } else if(info[0] == 'a') {
+				        	//Mueve el motor a la izquierda
+				        	motor_reverse();
+				        	delay_ms(500);   // Espera 0.5 segundos
+				        	motor_stop();
+				        	info[0] = 'z';  // Respuesta con 'z'
+				        	UART_Send(LPC_UART0, info, sizeof(info), BLOCKING);
+				        } else if(info[0] == 'd') {
+				        	//Mueve el motor a la derecha
+				        	motor = 0;
+				        	motor_forward();
+				        	delay_ms(500);   // Espera 0.5 segundos
+				        	motor_stop();
+				        	info[0] = 'y';  // Respuesta con 'y'
+				        	UART_Send(LPC_UART0, info, sizeof(info), BLOCKING);
+				        }else {
+				        	motor_stop();     // Detiene el motor
+
+				        	if(info[0] == 13) { // Si es Enter (ASCII 13)
+				        		UART_Send(LPC_UART0, salto1, sizeof(salto1), BLOCKING);
+				        		UART_Send(LPC_UART0, salto2, sizeof(salto2), BLOCKING);
+				        	} else {
+				        		UART_Send(LPC_UART0, info, sizeof(info), BLOCKING);
+				        	}
+				        }
+				    }
+		}
 	}
 
 	return 0;
@@ -58,6 +135,97 @@ void configPin(void){
 	// Configuración de los pines P0.27, P0.28 como salidas
 	LPC_GPIO0->FIODIR |= (0b11<<27);
 }
+
+void configEXT(){
+	//configuro el p2.10 como EXT0
+		PINSEL_CFG_Type pinsel0;
+		pinsel0.OpenDrain = PINSEL_PINMODE_NORMAL;
+		pinsel0.Pinmode = PINSEL_PINMODE_TRISTATE;
+		pinsel0.Funcnum = PINSEL_FUNC_1;
+		pinsel0.Portnum = PINSEL_PORT_2;
+		pinsel0.Pinnum = PINSEL_PIN_10;
+		PINSEL_ConfigPin(&pinsel0);
+
+		LPC_SC->EXTMODE	 |= EINT0; 	//EINT0 edge sensitive
+		LPC_SC->EXTPOLAR &= ~EINT0; 	//EINT0 rising edge
+		LPC_SC->EXTINT |= EINT0; 	//EINT0 clear flag
+
+		NVIC_EnableIRQ(EINT0_IRQn);
+	//	NVIC_SetPriority(EINT0_IRQn, 2);
+
+}
+
+void EINT0_IRQHandler(void) {
+
+	NVIC_DisableIRQ(ADC_IRQn);
+	ADC_IntConfig(LPC_ADC, ADC_ADINTEN0, RESET);
+	ADC_IntConfig(LPC_ADC, ADC_ADINTEN1, RESET);
+	ADC_IntConfig(LPC_ADC, ADC_ADINTEN2, RESET);
+	ADC_IntConfig(LPC_ADC, ADC_ADINTEN4, RESET);
+
+	STOP_MOTOR();
+	STOP_MOTOR_V();
+
+	 flag_exti = 1;
+
+	LPC_SC->EXTINT |= EINT0;
+}
+
+void confUart(void) {
+
+	PINSEL_CFG_Type PinCfg;
+
+	 // Configuración de pines para UART en P0.2 y P0.3
+    PinCfg.Funcnum = 1;
+    PinCfg.OpenDrain = 0;
+    PinCfg.Pinmode = 0;
+    PinCfg.Pinnum = 2;
+    PinCfg.Portnum = 0;
+    PINSEL_ConfigPin(&PinCfg);
+    PinCfg.Pinnum = 3;
+    PINSEL_ConfigPin(&PinCfg);
+
+
+    UART_CFG_Type UartCfgStruct;
+    UART_FIFO_CFG_Type UartFifoCfgStruct;
+
+    UartCfgStruct.Baud_rate = 9600; // Cambiado a 9600 baudios
+    UartCfgStruct.Databits = UART_DATABIT_8;
+    UartCfgStruct.Parity = UART_PARITY_NONE;
+    UartCfgStruct.Stopbits = UART_STOPBIT_1;
+
+    UART_Init(LPC_UART0, &UartCfgStruct); // Inicializa el periférico UART
+    UART_FIFOConfigStructInit(&UartFifoCfgStruct); // Inicializa FIFO
+    UART_FIFOConfig(LPC_UART0, &UartFifoCfgStruct);
+    UART_TxCmd(LPC_UART0, ENABLE);
+ //   NVIC_SetPriority(LPC_UART0, 1);
+
+    return;
+}
+
+void UART0_IRQHandler(void) {
+    uint32_t intsrc, tmp, tmp1;
+
+    intsrc = UART_GetIntId(LPC_UART0); // Determina la fuente de interrupción
+    tmp = intsrc & UART_IIR_INTID_MASK; // Evalúa si Transmit Holding está vacío
+
+    if(tmp == UART_IIR_INTID_RLS) { // Evalúa line Status
+        tmp1 = UART_GetLineStatus(LPC_UART0);
+        tmp1 &= (UART_LSR_OE | UART_LSR_PE | UART_LSR_FE | UART_LSR_BI | UART_LSR_RXFE);
+        if(tmp1)
+            while(1){}; // Error de línea
+    }
+    if((tmp == UART_IIR_INTID_RDA) || (tmp == UART_IIR_INTID_CTI))
+        UART_IntReceive();
+
+    return;
+}
+
+void UART_IntReceive(void) {
+    UART_Receive(LPC_UART0, info, sizeof(info), NONE_BLOCKING);
+    return;
+}
+
 
 void configADC(void){
 	//conf los p0.23 y p024 como AD0 y AD1/
@@ -91,6 +259,7 @@ void configADC(void){
 		ADC_IntConfig(LPC_ADC, ADC_ADINTEN4, SET);
 
 		NVIC_EnableIRQ(ADC_IRQn);
+	//	NVIC_SetPriority(ADC_IRQn, 5);
 }
 
 void ADC_IRQHandler(){
@@ -259,6 +428,38 @@ void STOP_MOTOR(){
 	LPC_GPIO0->FIOSET = (1 << IN1_PIN);  // IN1 en HIGH
 
 	return;
+}
+
+void motor_forward() {
+	if(motor){	//Motor base - horizontal
+		LPC_GPIO0->FIOSET = (1 << IN0_PIN);  // IN1 en HIGH
+		LPC_GPIO0->FIOCLR = (1 << IN1_PIN);  // IN2 en LOW
+	} else {	//Motor brazo - vertical
+		LPC_GPIO0->FIOSET = (1 << IN2_PIN);  // IN1 en HIGH
+		LPC_GPIO0->FIOCLR = (1 << IN4_PIN);  // IN2 en LOW
+	}
+
+}
+
+void motor_reverse() {
+	if(motor){
+		LPC_GPIO0->FIOCLR = (1 << IN0_PIN);  // IN1 en LOW
+		LPC_GPIO0->FIOSET = (1 << IN1_PIN);  // IN2 en HIGH
+	} else {
+		LPC_GPIO0->FIOCLR = (1 << IN2_PIN);  // IN1 en LOW
+		LPC_GPIO0->FIOSET = (1 << IN4_PIN);  // IN2 en HIGH
+	}
+}
+
+void motor_stop() {
+	if(motor){
+		LPC_GPIO0->FIOCLR = (1 << IN0_PIN);  // IN1 en LOW
+		LPC_GPIO0->FIOCLR = (1 << IN1_PIN);  // IN2 en LOW
+	} else {
+		LPC_GPIO0->FIOCLR = (1 << IN2_PIN);  // IN1 en LOW
+		LPC_GPIO0->FIOCLR = (1 << IN4_PIN);  // IN2 en LOW
+	}
+
 }
 
 
