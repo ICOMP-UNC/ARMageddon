@@ -1,3 +1,14 @@
+*
+ * ELECTRONICA DIGITAL III 2024
+ * Proyecto Final
+ * @file Girasol-Electronico.c
+ * @brief sistema embebido para el control de un dispositivo con dos grados de libertad rotacional,
+ * equipado con cuatro sensores de luz en su punta, que permite posicionarse automáticamente para maximizar la
+ * captación de luminosidad. El sistema también incluye un modo de operación manual, controlado por UART, que
+ * permite el movimiento direccional mediante comandos de teclado.
+ * @version 1.0
+ */
+	 
 #include "LPC17xx.h"
 #include "lpc17xx_gpio.h"
 #include "lpc17xx_pinsel.h"
@@ -14,12 +25,27 @@
 #define IN1_PIN 8    // Conectar IN1 del L298N al pin P0.8
 #define IN2_PIN 27   // Conectar IN2 del L298N al pin P0.27
 #define IN4_PIN 28   // Conectar IN4 del L298N al pin P0.28
+
 #define EINT0  	(1<<0)
+
+#define ENA_PIN (1 << 1)  // P2.1 para ENA (PWM1.2)
+
+#define	time_manual			10
+#define	time_automatico 	100
+#define LED_PIN ((uint32_t)(1 << 22)) /* P0.22 connected to LED */
+#define OUTPUT (uint8_t)	 1
+#define INPUT (uint8_t) 	 0
+
+#define DMA_SIZE 60
+#define NUM_SINE_SAMPLE 60
+#define SINE_FREQ_IN_HZ 50
+#define PCLK_DAC_IN_MHZ 25 //CCLK divided by 4
 
 void configPin(void);
 void configADC(void);
 void configTimer0();
 void configTimer1();
+void confUart(void);
 void ROTATE_COUNTERCLOCKWISE();
 void ROTATE_CLOCKWISE();
 void STOP_MOTOR();
@@ -30,10 +56,17 @@ void configEXT();
 void motor_forward();
 void motor_reverse();
 void motor_stop();
-void confUart(void);
 void UART0_IRQHandler(void);
 void UART_IntReceive(void);
+void setupPWM(void);
+void setMotorSpeed(uint8_t dutyCycle);
+void config_SYSTICK();
+void confDMA(void);
+void confDac(void);
 
+GPDMA_Channel_CFG_Type GPDMACfg;
+
+uint32_t dac_sine_lut[NUM_SINE_SAMPLE];
 
 __IO uint32_t ldr0_value;
 __IO uint32_t ldr1_value;
@@ -58,9 +91,31 @@ uint8_t salto1[] = "\n";
 uint8_t salto2[] = "\r";
 
 int main(void){
+	uint32_t i;
+	uint32_t sin_0_to_90_16_samples[16]={0,1045,2079,3090,4067, 5000,5877,6691,7431,8090,8660,9135,9510,9781,9945,10000};
 
 	configPin();
 	configEXT();
+	setupPWM();
+	setMotorSpeed(60);
+	config_SYSTICK();
+	confDac();
+	//Prepare DAC sine look up table
+		for(i=0;i<NUM_SINE_SAMPLE;i++){
+			if(i<=15){
+				dac_sine_lut[i] = 512 + 512*sin_0_to_90_16_samples[i]/10000;
+				if(i==15)
+					dac_sine_lut[i]= 1023;}
+			else if(i<=30){
+				dac_sine_lut[i] = 512 + 512*sin_0_to_90_16_samples[30-i]/10000;}
+			else if(i<=45){
+				dac_sine_lut[i] = 512 - 512*sin_0_to_90_16_samples[i-30]/10000;}
+			else{
+				dac_sine_lut[i] = 512 - 512*sin_0_to_90_16_samples[60-i]/10000;}
+		dac_sine_lut[i] = (dac_sine_lut[i]<<6);}
+	confDMA();
+	// Enable GPDMA channel 0
+	GPDMA_ChannelCmd(0, ENABLE);
 	configADC();
 	configTimer0();
 	configTimer1();
@@ -71,6 +126,7 @@ int main(void){
 	while(1){
 
 		if(flag_exti){
+			config_SYSTICK();
 
 			while(1) {
 				        len = 0;
@@ -134,6 +190,32 @@ void configPin(void){
 	LPC_PINCON->PINSEL1 &= ~(0xF<<22);
 	// Configuración de los pines P0.27, P0.28 como salidas
 	LPC_GPIO0->FIODIR |= (0b11<<27);
+
+	PINSEL_CFG_Type led_pin_cfg; /* Create a variable to store the configuration of the pin */
+
+     /* We need to configure the struct with the desired configuration */
+	led_pin_cfg.Portnum = PINSEL_PORT_0;           /* The port number is 0 */
+	led_pin_cfg.Pinnum = PINSEL_PIN_22;            /* The pin number is 22 */
+	led_pin_cfg.Funcnum = PINSEL_FUNC_0;           /* The function number is 0 */
+	led_pin_cfg.Pinmode = PINSEL_PINMODE_PULLUP;   /* The pin mode is pull-up */
+    led_pin_cfg.OpenDrain = PINSEL_PINMODE_NORMAL; /* The pin is in the normal mode */
+
+		    /* Configure the pin */
+	 PINSEL_ConfigPin(&led_pin_cfg);
+
+		    /* Set the pins as input or output */
+	 GPIO_SetDir(PINSEL_PORT_0, LED_PIN, OUTPUT); /* Set the P0.22 pin as output */
+	 PINSEL_CFG_Type PinCfg;
+	 /*
+	 * Init DAC pin connect
+	 * AOUT on P0.26
+	 */
+	 PinCfg.Funcnum = 2;
+	 PinCfg.OpenDrain = 0;
+	 PinCfg.Pinmode = 0;
+	 PinCfg.Pinnum = 26;
+	 PinCfg.Portnum = 0;
+	 PINSEL_ConfigPin(&PinCfg);
 }
 
 void configEXT(){
@@ -462,5 +544,104 @@ void motor_stop() {
 
 }
 
+// Configuración de PWM para ENA
+void setupPWM(void) {
+    LPC_SC->PCONP |= (1 << 6);     // Habilitar el periférico PWM1
+    LPC_SC->PCLKSEL0 |= (1 << 12); // Seleccionar el clock para PWM1
 
+    LPC_PINCON->PINSEL4 |= (1 << 2); // Configurar P2.1 como PWM1.2
 
+    LPC_PWM1->MR0 = 10000;         // Ciclo total del PWM (1000 -> 1kHz)
+    LPC_PWM1->MR2 = 0;            // Ciclo de trabajo inicial al 0%
+    LPC_PWM1->LER |= (1 << 0) | (1 << 2); // Actualizar MR0 y MR2
+
+    LPC_PWM1->MCR = (1 << 1);     // Reset del contador en MR0
+    LPC_PWM1->PCR |= (1 << 10);   // Habilitar PWM1.2
+    LPC_PWM1->TCR = (1 << 0) | (1 << 3); // Habilitar el contador y el modo PWM
+}
+
+// Configuración de la velocidad del motor mediante PWM
+void setMotorSpeed(uint8_t dutyCycle) {
+    //if (dutyCycle > 100) dutyCycle = 100; // Limitar el duty cycle al 100%
+    LPC_PWM1->MR2 = (LPC_PWM1->MR0 * dutyCycle) / 100; // Calcular nuevo MR2
+    LPC_PWM1->LER |= (1 << 2); // Actualizar MR2
+}
+
+void config_SYSTICK(){
+
+	if((flag_exti=1)){
+
+		SYSTICK_InternalInit(time_manual);
+
+	}
+
+	else{
+		SYSTICK_InternalInit(time_automatico);
+	}
+		SYSTICK_Cmd(ENABLE);
+		SYSTICK_IntCmd(ENABLE);
+}
+
+void SysTick_Handler(void)
+{
+    SYSTICK_ClearCounterFlag(); /* Clear interrupt flag */
+
+    if (GPIO_ReadValue(PINSEL_PORT_0) & LED_PIN)
+    {
+        GPIO_ClearValue(PINSEL_PORT_0, LED_PIN); /* Turn off LED */
+    }
+    else
+    {
+        GPIO_SetValue(PINSEL_PORT_0, LED_PIN); /* Turn on LED */
+    }
+}
+
+void confDMA(void){
+	GPDMA_LLI_Type DMA_LLI_Struct;
+	//Prepare DMA link list item structure
+	DMA_LLI_Struct.SrcAddr= (uint32_t)dac_sine_lut;
+	DMA_LLI_Struct.DstAddr= (uint32_t)&(LPC_DAC->DACR);
+	DMA_LLI_Struct.NextLLI= (uint32_t)&DMA_LLI_Struct;
+	DMA_LLI_Struct.Control= DMA_SIZE
+												| (2<<18) //source width 32 bit
+												| (2<<21) //dest. width 32 bit
+												| (1<<26); //source increment;
+
+	/* GPDMA block section -------------------------------------------- */
+	/* Initialize GPDMA controller */
+	GPDMA_Init();
+	// Setup GPDMA channel --------------------------------
+	// channel 0
+	GPDMACfg.ChannelNum = 0;
+	// Source memory
+	GPDMACfg.SrcMemAddr = (uint32_t)(dac_sine_lut);
+	// Destination memory - unused
+	GPDMACfg.DstMemAddr = 0;
+	// Transfer size
+	GPDMACfg.TransferSize = DMA_SIZE;
+	// Transfer width - unused
+	GPDMACfg.TransferWidth = 0;
+	// Transfer type
+	GPDMACfg.TransferType = GPDMA_TRANSFERTYPE_M2P;
+	// Source connection - unused
+	GPDMACfg.SrcConn = 0;
+	// Destination connection
+	GPDMACfg.DstConn = GPDMA_CONN_DAC;
+	// Linker List Item - unused
+	GPDMACfg.DMALLI = (uint32_t)&DMA_LLI_Struct;
+	// Setup channel with given parameter
+	GPDMA_Setup(&GPDMACfg);
+	return;}
+
+void confDac(void){
+	uint32_t tmp;
+	DAC_CONVERTER_CFG_Type DAC_ConverterConfigStruct;
+	DAC_ConverterConfigStruct.CNT_ENA = SET;
+	DAC_ConverterConfigStruct.DMA_ENA = SET;
+
+	DAC_Init(LPC_DAC);
+	/* set time out for DAC*/
+	tmp = (PCLK_DAC_IN_MHZ*1000000)/(SINE_FREQ_IN_HZ*NUM_SINE_SAMPLE);
+	DAC_SetDMATimeOut(LPC_DAC,tmp);
+	DAC_ConfigDAConverterControl(LPC_DAC, &DAC_ConverterConfigStruct);
+	return;}
