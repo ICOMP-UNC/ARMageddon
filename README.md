@@ -137,6 +137,7 @@ La UART funciona con un módulo USB-UART que conecta el microcontrolador a la co
     Por último, nos da la opción de elegir la estructura de directorios del proyecto. Dandonos la posibilidad de cambiar el nombre del directorio para los fuentes y la posibilidad de crear un directorio 'inc' para los headers file y añadir automáticamente al path este mismo. Dar en `Finish` y se abrirá la ventana de un proyecto con un main básico, alli copiar el codigo de la carpeta `src` de este repositorio y compilar.
 
 ---
+![DiagramaFlujo drawio](https://github.com/user-attachments/assets/fb18f2d2-324a-49f6-a9ae-1364222c2dec)
 
 ![ADC_Handler drawio](https://github.com/user-attachments/assets/bba5d45d-62ba-49dd-a4bf-e75dd36e75aa)
 
