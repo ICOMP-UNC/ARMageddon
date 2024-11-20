@@ -19,6 +19,36 @@ El sistema debe operar de manera confiable y estable durante períodos prolongad
 
 ## Diseño del proyecto
 
+```mermaid
+sequenceDiagram
+    participant USER
+    participant BUTTON
+    participant SYSTEM
+    participant SYSTICK
+    participant ADC
+    participant DAC
+    participant MOTORS
+    participant LED
+    
+    SYSTEM->>MOTORS: Ajustar vel mediante PWM
+    USER ->>BUTTON: Cambio de modo
+
+    alt Modo Manual
+        USER->>SYSTEM: Controla motores mediante teclas por UART
+        SYSTEM->>MOTORS: Envía comandos a motores
+        SYSTEM->>DAC: Mostrar señal sinusoidal
+        SYSTEM->>SysTick: Actualizar frecuencia de parpadeo 100ms
+    else Modo Automático
+        SYSTEM->>ADC: Lectura de los sensores y determinar mayor luminosidad
+        ADC-->>MOTORS: Ajusta motores según la luminosidad
+        SYSTEM->>SysTick: Actualizar frecuencia de parpadeo 10ms
+    end
+
+    loop Variación de frecuencia (SysTick)
+        SYSTICK->>LED: parpadeo
+    end
+```
+
 #### RGB & Systick
 Un LED de color de tipo RGB es básicamente la unión de 3 LEDs de diferentes colores: rojo, verde y azul. El control de los colores y frecuencia de parpadeo se realiza mediante el Systick que indica el modo en el que esta trabajando el sistema. 
 
@@ -66,13 +96,14 @@ La UART funciona con un módulo USB-UART que conecta el microcontrolador a la co
 - Driver L298N
 - 2 Motores de CC de 6gr
 - 1 Modulo USB UART
-- 4 resistencias 1 MΩ
+- 4 resistencias 470 Ω
 - Fuente de 12V
 - 3 Protoboard
 - Cables de conexión para placa de pruebas
-- 4 LDR un potenciómetro de unos 20kΩ
+- 4 LDR
 - 1 boton
 - 1 osciloscopio para observar la salida del DAC
+- 5 Conversores de 3.3V a 5V
 
 
 ---
