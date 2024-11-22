@@ -18,7 +18,6 @@
 #include "lpc17xx_timer.h"
 #include "lpc17xx_uart.h"
 
-
 /** @defgroup GPIO_PINS Pines GPIO configurados para control del motor */
 /**@{*/
 #define IN0_PIN 9  /**< Pin P0.9 conectado a IN0 del L298N */
