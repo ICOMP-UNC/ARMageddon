@@ -174,6 +174,10 @@ GPDMA_Channel_CFG_Type GPDMACfg; /**< Configuración del canal DMA */
 /** @brief Look-up table para la señal senoidal generada por el DAC */
 uint32_t dac_sine_lut[NUM_SINE_SAMPLE];
 
+/** @brief variable para uart */
+uint8_t len;
+/** @brief otra variable para uart */
+uint8_t info;
 /** @brief Valores leídos desde los sensores de luz */
 __IO uint32_t ldr0_value; /**< Valor del sensor LDR 0 */
 __IO uint32_t ldr1_value; /**< Valor del sensor LDR 1 */
