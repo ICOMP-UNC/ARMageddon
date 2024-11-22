@@ -837,8 +837,8 @@ void setupPWM(void)
 }
 
 /**
- * @brief Sets motor speed via PWM by adjusting the duty cycle.
- * @param dutyCycle Percentage of the duty cycle (0-100).
+ * @brief Establece la velocidad del motor mediante el ciclo útil del PWM.
+ * @param dutyCycle Ciclo útil del PWM (en porcentaje).
  */
 void setMotorSpeed(uint8_t dutyCycle)
 {
