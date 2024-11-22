@@ -193,7 +193,7 @@ uint8_t motor;
 char salto1[] = "\n";
 /**
  * @var char salto2[]
- * @brief Cadena que contiene el carácter de retorno ('\r').
+ * @brief Cadena que contiene el carácter de retorno.
  */
 char salto2[] = "\r";
 
