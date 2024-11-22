@@ -187,8 +187,16 @@ uint8_t flag_exti = 0;
 uint8_t motor;
 
 
-uint8_t salto1[] = "\n";
-uint8_t salto2[] = "\r";
+/**
+ * @var char salto1[]
+ * @brief Cadena que contiene el carácter de nueva línea ('\n').
+ */
+char salto1[] = "\n";
+/**
+ * @var char salto2[]
+ * @brief Cadena que contiene el carácter de retorno ('\r').
+ */
+char salto2[] = "\r";
 
 /**
  * @brief Función principal del sistema.
@@ -234,59 +242,7 @@ int main(void){
 
 //	motor_stop();     // Motor detenido
 
-	while(1){
-
-		if(flag_exti){
-			config_SYSTICK();
-
-			while(1) {
-				        len = 0;
-				        while(len == 0)
-				            len = UART_Receive(LPC_UART0, info, sizeof(info), NONE_BLOCKING);
-
-				        if(info[0] == 'w') {
-				        	// Mueve el motor hacia arriba
-				        	motor = 1;
-				            motor_forward();
-				            while(!TIM_GetIntStatus(LPC_TIM1,TIM_MR0_INT)); //retardo
-				            motor_stop();
-				            info[0] = 'x';  // Respuesta con 'x'
-				            UART_Send(LPC_UART0, info, sizeof(info), BLOCKING);
-				        } else if(info[0] == 's') {
-				            //Mueve el motor hacia abajo
-				        	motor_reverse();
-				        	while(!TIM_GetIntStatus(LPC_TIM1,TIM_MR0_INT)); //retardo
-				        	motor_stop();
-				        	info[0] = 'l';  // Respuesta con 'l'
-				        	UART_Send(LPC_UART0, info, sizeof(info), BLOCKING);
-				        } else if(info[0] == 'a') {
-				        	//Mueve el motor a la izquierda
-				        	motor_reverse();
-				        	while(!TIM_GetIntStatus(LPC_TIM1,TIM_MR0_INT)); //retardo
-				        	motor_stop();
-				        	info[0] = 'z';  // Respuesta con 'z'
-				        	UART_Send(LPC_UART0, info, sizeof(info), BLOCKING);
-				        } else if(info[0] == 'd') {
-				        	//Mueve el motor a la derecha
-				        	motor = 0;
-				        	motor_forward();
-				        	while(!TIM_GetIntStatus(LPC_TIM1,TIM_MR0_INT)); //retardo
-				        	motor_stop();
-				        	info[0] = 'y';  // Respuesta con 'y'
-				        	UART_Send(LPC_UART0, info, sizeof(info), BLOCKING);
-				        }else {
-				        	motor_stop();     // Detiene el motor
-
-				        	if(info[0] == 13) { // Si es Enter (ASCII 13)
-				        		UART_Send(LPC_UART0, salto1, sizeof(salto1), BLOCKING);
-				        		UART_Send(LPC_UART0, salto2, sizeof(salto2), BLOCKING);
-				        	} else {
-				        		UART_Send(LPC_UART0, info, sizeof(info), BLOCKING);
-				        	}
-				        }
-				    }
-		}
-	}
+	while(1){}
 
 	return 0;
 }
@@ -429,7 +385,50 @@ void UART0_IRQHandler(void) {
     }
     if((tmp == UART_IIR_INTID_RDA) || (tmp == UART_IIR_INTID_CTI))
         UART_IntReceive();
+                len = 0;
+				        while(len == 0)
+				            len = UART_Receive(LPC_UART0, info, sizeof(info), NONE_BLOCKING);
 
+				        if(info[0] == 'w') {
+				        	// Mueve el motor hacia arriba
+				        	motor = 1;
+				            motor_forward();
+				            while(!TIM_GetIntStatus(LPC_TIM1,TIM_MR0_INT)); //retardo
+				            motor_stop();
+				            info[0] = 'x';  // Respuesta con 'x'
+				            UART_Send(LPC_UART0, info, sizeof(info), BLOCKING);
+				        } else if(info[0] == 's') {
+				            //Mueve el motor hacia abajo
+				        	motor_reverse();
+				        	while(!TIM_GetIntStatus(LPC_TIM1,TIM_MR0_INT)); //retardo
+				        	motor_stop();
+				        	info[0] = 'l';  // Respuesta con 'l'
+				        	UART_Send(LPC_UART0, info, sizeof(info), BLOCKING);
+				        } else if(info[0] == 'a') {
+				        	//Mueve el motor a la izquierda
+				        	motor_reverse();
+				        	while(!TIM_GetIntStatus(LPC_TIM1,TIM_MR0_INT)); //retardo
+				        	motor_stop();
+				        	info[0] = 'z';  // Respuesta con 'z'
+				        	UART_Send(LPC_UART0, info, sizeof(info), BLOCKING);
+				        } else if(info[0] == 'd') {
+				        	//Mueve el motor a la derecha
+				        	motor = 0;
+				        	motor_forward();
+				        	while(!TIM_GetIntStatus(LPC_TIM1,TIM_MR0_INT)); //retardo
+				        	motor_stop();
+				        	info[0] = 'y';  // Respuesta con 'y'
+				        	UART_Send(LPC_UART0, info, sizeof(info), BLOCKING);
+				        }else {
+				        	motor_stop();     // Detiene el motor
+
+				        	if(info[0] == 13) { // Si es Enter (ASCII 13)
+				        		UART_Send(LPC_UART0, salto1, sizeof(salto1), BLOCKING);
+				        		UART_Send(LPC_UART0, salto2, sizeof(salto2), BLOCKING);
+				        	} else {
+				        		UART_Send(LPC_UART0, info, sizeof(info), BLOCKING);
+				        	}
+				        }
     return;
 }
 
@@ -811,6 +810,9 @@ void SysTick_Handler(void)
     else
     {
         GPIO_SetValue(PINSEL_PORT_0, LED_PIN); /* Turn on LED */
+    }
+    if(flag_exti){
+    			config_SYSTICK();
     }
 }
 
