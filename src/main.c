@@ -392,7 +392,7 @@ void confUart(void)
 
 void UART0_IRQHandler(void)
 {
-    uint32_t intsrc, tmp, tmp1;
+    char intsrc, tmp, tmp1;
 
     intsrc = UART_GetIntId(LPC_UART0);  // Determina la fuente de interrupción
     tmp = intsrc & UART_IIR_INTID_MASK; // Evalúa si Transmit Holding está vacío
