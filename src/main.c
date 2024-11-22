@@ -1,5 +1,5 @@
 /**
- * @file Girasol-Electronico.c
+ * @file main.c
  * @brief Sistema embebido para el control de un dispositivo con dos grados de libertad rotacional, equipado con
  * sensores de luz en su punta, que permite posicionarse automáticamente para maximizar la captación de luminosidad.
  * Incluye modo manual mediante UART.
